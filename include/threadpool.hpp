@@ -150,7 +150,6 @@ public:
         ~Thread() {
           for (size_t i=0; i<queues_.size(); i++) {
             queues_[i]->Wait();
-            delete queues_[i];
           }
           if (thr_.joinable()) thr_.join();
         }
@@ -207,6 +206,9 @@ public:
             threads_[i].Stop();
         }
         delete [] threads_;
+        for (int i=0; i<pool_size_; i++) {
+            delete queues_[i];    
+        }
         delete [] queues_;
     }
     ThreadPool(const ThreadPool&) = delete;
