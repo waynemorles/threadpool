@@ -19,6 +19,7 @@ public:
     class Runable {
     public:
         virtual bool operator()() noexcept { return true; }
+        virtual ~Runable() {}
     };
     using Queue = ConcurrentBlockingQueue<Runable*>;    
     template <typename T> class Future;
@@ -147,6 +148,10 @@ public:
     public:
         Thread() {}
         ~Thread() {
+          for (size_t i=0; i<queues_.size(); i++) {
+            queues_[i]->Wait();
+            delete queues_[i];
+          }
           if (thr_.joinable()) thr_.join();
         }
         void Bind(Queue* q) {
@@ -156,23 +161,28 @@ public:
             thr_ = std::thread([&](){
                size_t sz = queues_.size(); 
                size_t counter = 0;
-               size_t tries = 0;
+               size_t failed_tries = 0;
                while(!stop_) {
                 Runable* runable;
-                tries ++;
-                if(queues_[counter++ % sz]->TryPop(runable)) {
+                if(queues_[counter++ % sz]->TryPopQ(runable)) {
                   (*runable)();
+                  delete runable;
                 } else {
-                  if (tries == sz) {
-                    queues_[counter ++ % sz]->Pop(runable);
-                    (*runable)();
-                    tries = 0;
+                  failed_tries ++;
+                  if (failed_tries == sz) {
+                    if(queues_[counter ++ % sz]->Pop(runable)) {
+                      (*runable)();
+                      delete runable;
+                    }
+                    failed_tries = 0;
                   }
                 }                  
                }
             });
         }
-        void Stop() { stop_ = true; }
+        void Stop() { 
+            stop_ = true; 
+        }
     private:
         std::thread thr_;
         std::vector<Queue*> queues_;
@@ -180,21 +190,24 @@ public:
     };
 
     ThreadPool(int pool_size, int capacity): pool_size_(pool_size) {
-        Queue** p = new Queue*[pool_size];
-        for (int i=0; i<pool_size; i++) {
-            p[i] = new Queue(capacity, 10);
-        }
         threads_ = new Thread[pool_size];
+        queues_ = new Queue*[pool_size];
         for (int i=0; i<pool_size; i++) {
-            threads_[i].Bind(p[i]);
+            queues_[i] = new Queue(capacity, 10);
+            // dispatch queue to thread
+            threads_[i].Bind(queues_[i]);
+        }
+        for (int i=0; i<pool_size_; i++) {
             threads_[i].Start();
         }
-        queues_ = p;
     }
     ~ThreadPool() {
+        stop_ = false;
         for (int i=0; i<pool_size_; i++) {
             threads_[i].Stop();
         }
+        delete [] threads_;
+        delete [] queues_;
     }
     ThreadPool(const ThreadPool&) = delete;
     ThreadPool& operator=(const ThreadPool&) = delete;
