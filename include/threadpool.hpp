@@ -4,6 +4,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -43,7 +44,8 @@ public:
         }
         Code code() const { return code_; }
         std::string& errorMsg() { return error_msg_; }
-        T& result() const { return result_; }
+        bool success() { return code_ == SUCCESS; }
+        T& result() { return result_; }
         int code_;
         T result_;
         std::string error_msg_;
@@ -158,15 +160,15 @@ public:
                while(!stop_) {
                 Runable* runable;
                 tries ++;
-                //if(queues_[counter++ % sz]->TryPop(runable)) {
-                //  (*runable)();
-                //} else {
+                if(queues_[counter++ % sz]->TryPop(runable)) {
+                  (*runable)();
+                } else {
                   if (tries == sz) {
                     queues_[counter ++ % sz]->Pop(runable);
                     (*runable)();
                     tries = 0;
                   }
-                //}                  
+                }                  
                }
             });
         }
@@ -197,7 +199,8 @@ public:
     ThreadPool(const ThreadPool&) = delete;
     ThreadPool& operator=(const ThreadPool&) = delete;
 
-    template<class F, class... Args>
+    template<class F, class... Args,
+        typename = typename std::enable_if<std::is_function<F(Args...)>::value>::type>
     auto Post(F&& f, Args&&... args)
     -> Future<typename std::result_of<F(Args...)>::type> {
         using result_type = typename std::result_of<F(Args...)>::type;
@@ -206,6 +209,15 @@ public:
                     [&](Status<result_type>&) {}, true);
         ChooseQueue()->Push(task);
         return static_cast<FutureTask<result_type>*>(task)->GetFuture();
+    }
+
+    template<class F, class C,
+        typename = typename std::enable_if<std::is_function<F()>::value>::type,
+        typename = typename std::enable_if<std::is_function<C()>::value>::type>
+    void Post(F&& f, C&& callback) {
+        using result_type = typename std::result_of<F()>::type;
+        Runable* task = Task<result_type>::Create(f,callback, false);
+        ChooseQueue()->Push(task);
     }
     
 private:
