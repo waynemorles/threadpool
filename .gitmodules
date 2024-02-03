@@ -1,3 +1,4 @@
 [submodule "parallelcontainers"]
 	path = parallelcontainers
 	url = https://github.com/waynemorles/parallelcontainers.git
+	branch = main
